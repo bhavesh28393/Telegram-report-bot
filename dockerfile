@@ -2,7 +2,7 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install required system dependencies (without playwright install-deps)
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -40,18 +40,12 @@ RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python packages
+# Install all Python packages
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir playwright==1.40.0
-RUN pip install --no-cache-dir playwright-stealth==1.0.6
-RUN pip install --no-cache-dir pyTelegramBotAPI==4.14.0
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Set Chrome environment variables
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/lib/playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-
-# Install Playwright Chromium (without deps check)
-RUN playwright install chromium || true
+# Install Playwright browsers
+RUN playwright install chromium
 
 # Copy bot code
 COPY report_bot.py .
