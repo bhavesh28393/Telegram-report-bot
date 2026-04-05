@@ -11,7 +11,7 @@ from playwright.sync_api import sync_playwright
 from playwright_stealth import stealth_sync
 
 # ============= CONFIG =============
-API_TOKEN = "8623039191:AAH4ZBGdbaTKVinsgjz0SdXhas2JKQzSqbQ"
+API_TOKEN = "8623039191:AAErxthmUyJAZV-xsEP2I_OY5rW_IUc6_8Q"
 OWNER_ID = 8336576838
 OWNER_USERNAME = "@pruvn"
 DB_FILE = "sessions.json"
