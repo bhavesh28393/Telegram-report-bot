@@ -1,17 +1,18 @@
 FROM python:3.10-slim
 
-# Install system dependencies
+WORKDIR /app
+
+# Install system dependencies (no apt-key)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome for Playwright
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
-    && apt-get update && apt-get install -y \
-    google-chrome-stable \
+# Install Chrome directly (without apt-key)
+RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get update && apt-get install -y ./google-chrome-stable_current_amd64.deb \
     libnss3 \
     libnspr4 \
     libatk-bridge2.0-0 \
@@ -25,23 +26,21 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     libxrandr2 \
     libgbm1 \
     libasound2 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm google-chrome-stable_current_amd64.deb
 
-WORKDIR /app
-
-# Copy requirements first (for better caching)
+# Copy requirements first
 COPY requirements.txt .
 
-# Install Python packages (no greenlet issues)
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir playwright==1.40.0 && \
-    pip install --no-cache-dir playwright-stealth==1.0.6 && \
-    pip install --no-cache-dir pyTelegramBotAPI==4.14.0 && \
-    pip install --no-cache-dir flask==2.3.0
+# Install Python packages
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir playwright==1.40.0
+RUN pip install --no-cache-dir playwright-stealth==1.0.6
+RUN pip install --no-cache-dir pyTelegramBotAPI==4.14.0
 
 # Install Playwright Chromium
-RUN playwright install chromium && \
-    playwright install-deps
+RUN playwright install chromium
+RUN playwright install-deps
 
 # Copy bot code
 COPY report_bot.py .
