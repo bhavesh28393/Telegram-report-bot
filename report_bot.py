@@ -6,7 +6,6 @@ import threading
 import re
 from datetime import datetime
 import telebot
-from flask import Flask
 from playwright.sync_api import sync_playwright
 from playwright_stealth import stealth_sync
 
@@ -22,13 +21,6 @@ user_states = {}
 user_logins = {}
 MAX_ACCOUNTS_PER_USER = 4
 MAX_REPORT_LIMIT = 2000
-
-# Flask app for keep-alive (Render needs a web server)
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "🤖 Instagram Report Bot is running!"
 
 # Report reasons
 REPORT_REASONS = {
@@ -87,31 +79,9 @@ def is_admin(user_id):
     db = load_db()
     return user_id == OWNER_ID or str(user_id) in db.get("admins", [])
 
-def add_admin(admin_id):
-    db = load_db()
-    if str(admin_id) not in db.get("admins", []):
-        db.setdefault("admins", []).append(str(admin_id))
-        save_db(db)
-        return True
-    return False
-
-def remove_admin(admin_id):
-    db = load_db()
-    if str(admin_id) in db.get("admins", []):
-        db["admins"].remove(str(admin_id))
-        save_db(db)
-        return True
-    return False
-
-def get_admins():
-    db = load_db()
-    return db.get("admins", [])
-
 def extract_username_from_url(url):
     match = re.search(r'instagram\.com/([a-zA-Z0-9_.]+)', url)
-    if match:
-        return match.group(1)
-    return None
+    return match.group(1) if match else None
 
 def take_profile_screenshot(session_data, username):
     try:
@@ -131,8 +101,7 @@ def take_profile_screenshot(session_data, username):
             
             browser.close()
             return screenshot_path
-    except Exception as e:
-        print(f"Screenshot error: {e}")
+    except:
         return None
 
 # ============= INSTAGRAM LOGIN =============
@@ -179,7 +148,7 @@ def instagram_login(username, password, verification_method=None, verification_c
                     submit_btn.click()
                     time.sleep(3)
                 else:
-                    return {"status": "verification_needed", "method": verification_method}
+                    return {"status": "verification_needed"}
             
             if "accounts/login" not in page.url and "challenge" not in page.url:
                 storage_state = context.storage_state()
@@ -188,6 +157,7 @@ def instagram_login(username, password, verification_method=None, verification_c
             else:
                 browser.close()
                 return {"status": "failed", "error": "Invalid credentials"}
+                
     except Exception as e:
         return {"status": "failed", "error": str(e)}
 
@@ -232,8 +202,7 @@ def report_account(session_data, username, reason):
             
             browser.close()
             return True
-    except Exception as e:
-        print(f"Report error: {e}")
+    except:
         return False
 
 # ============= REPORT WORKER =============
@@ -251,10 +220,7 @@ def report_worker(report_id, user_id, accounts, username, reason, report_limit):
         
         if success:
             success_count += 1
-            bot.send_message(user_id, 
-                f"✅ Report #{reports_sent + 1} submitted by {nickname}\n"
-                f"Target: @{username}\n"
-                f"Reason: {reason}")
+            bot.send_message(user_id, f"✅ Report #{reports_sent + 1} submitted by {nickname}\nTarget: @{username}")
         else:
             fail_count += 1
         
@@ -262,12 +228,7 @@ def report_worker(report_id, user_id, accounts, username, reason, report_limit):
         account_index += 1
         time.sleep(random.uniform(1, 3))
     
-    status_text = f"📊 REPORTING COMPLETED!\n\n"
-    status_text += f"✅ Successful: {success_count}\n"
-    status_text += f"❌ Failed: {fail_count}\n"
-    status_text += f"🎯 Target: @{username}"
-    
-    bot.send_message(user_id, status_text)
+    bot.send_message(user_id, f"📊 REPORTING COMPLETED!\n✅ Successful: {success_count}\n❌ Failed: {fail_count}\n🎯 Target: @{username}")
     active_reports[report_id] = False
 
 # ============= BOT COMMANDS =============
@@ -294,151 +255,9 @@ def cmd_start(message):
 Made by {OWNER_USERNAME}"""
     
     if user_id == OWNER_ID:
-        text += """
-
-👑 Owner Commands:
-/add_admin - Add admin
-/remove_admin - Remove admin
-/adminlist - List all admins
-/broadcast - Message all users"""
-    elif is_admin(user_id):
-        text += """
-
-👑 Admin Commands:
-/broadcast - Message all users"""
+        text += "\n\n👑 Owner Commands:\n/add_admin\n/remove_admin\n/adminlist"
     
     bot.reply_to(message, text)
-
-# ============= NON-ADMIN HANDLER =============
-@bot.message_handler(func=lambda m: True, content_types=['text'])
-def handle_non_admin(message):
-    user_id = message.from_user.id
-    
-    # Skip if user is owner or admin
-    if user_id == OWNER_ID or is_admin(user_id):
-        return
-    
-    # Skip command messages
-    if message.text.startswith('/'):
-        return
-    
-    # Send access denied message
-    bot.reply_to(message, 
-        f"⚠️ <b>Access Denied!</b>\n\n"
-        f"❌ You are not authorized to use this bot.\n"
-        f"🆔 Your Telegram ID: <code>{user_id}</code>\n\n"
-        f"📩 Please send this ID to {OWNER_USERNAME} to get access.\n\n"
-        f"🔒 This bot is for authorized users only.",
-        parse_mode='HTML')
-
-# ============= OWNER COMMANDS =============
-@bot.message_handler(commands=['add_admin'])
-def cmd_add_admin(message):
-    if message.from_user.id != OWNER_ID:
-        return
-    
-    try:
-        parts = message.text.split()
-        if len(parts) < 2:
-            bot.reply_to(message, "Usage: /add_admin <user_id>")
-            return
-        
-        admin_id = int(parts[1])
-        
-        if admin_id == OWNER_ID:
-            bot.reply_to(message, "❌ Owner is already admin!")
-            return
-        
-        if add_admin(admin_id):
-            bot.reply_to(message, f"✅ User {admin_id} is now an admin!")
-        else:
-            bot.reply_to(message, f"❌ User {admin_id} is already an admin!")
-    except:
-        bot.reply_to(message, "❌ Invalid user ID!")
-
-@bot.message_handler(commands=['remove_admin'])
-def cmd_remove_admin(message):
-    if message.from_user.id != OWNER_ID:
-        return
-    
-    try:
-        parts = message.text.split()
-        if len(parts) < 2:
-            bot.reply_to(message, "Usage: /remove_admin <user_id>")
-            return
-        
-        admin_id = int(parts[1])
-        
-        if admin_id == OWNER_ID:
-            bot.reply_to(message, "❌ Cannot remove owner!")
-            return
-        
-        if remove_admin(admin_id):
-            bot.reply_to(message, f"✅ User {admin_id} is no longer an admin!")
-        else:
-            bot.reply_to(message, f"❌ User {admin_id} was not an admin!")
-    except:
-        bot.reply_to(message, "❌ Invalid user ID!")
-
-@bot.message_handler(commands=['adminlist'])
-def cmd_adminlist(message):
-    if message.from_user.id != OWNER_ID:
-        return
-    
-    admins = get_admins()
-    text = "<b>👑 ADMIN LIST</b>\n\n"
-    text += f"👤 OWNER: {OWNER_USERNAME}\n\n"
-    
-    if admins:
-        text += "<b>📋 ADMINS:</b>\n"
-        for aid in admins:
-            text += f"• <code>{aid}</code>\n"
-    else:
-        text += "No other admins"
-    
-    bot.reply_to(message, text, parse_mode='HTML')
-
-@bot.message_handler(commands=['broadcast'])
-def cmd_broadcast(message):
-    if not is_admin(message.from_user.id):
-        return
-    
-    text = message.text.replace('/broadcast', '', 1).strip()
-    if not text:
-        bot.reply_to(message, "Usage: /broadcast <message>")
-        return
-    
-    db = load_db()
-    users = db.get('users', [])
-    
-    status = bot.reply_to(message, f"📢 Broadcasting to {len(users)} users...")
-    sent = 0
-    
-    for uid in users:
-        try:
-            bot.send_message(int(uid), f"📢 ANNOUNCEMENT\n\n{text}")
-            sent += 1
-            time.sleep(0.05)
-        except:
-            pass
-    
-    bot.edit_message_text(f"✅ Sent to {sent} users", status.chat.id, status.message_id)
-
-# ============= ACCOUNT COMMANDS =============
-@bot.message_handler(commands=['login'])
-def cmd_login(message):
-    if not is_admin(message.from_user.id):
-        return
-    
-    user_id = message.from_user.id
-    sessions = get_user_sessions(user_id)
-    
-    if len(sessions) >= MAX_ACCOUNTS_PER_USER:
-        bot.reply_to(message, f"❌ You already have {MAX_ACCOUNTS_PER_USER} accounts! Use /logout to remove one.")
-        return
-    
-    user_states[user_id] = {"step": "username"}
-    bot.reply_to(message, "🔐 Send Instagram username (without @):\n\nType /cancel to abort.")
 
 @bot.message_handler(commands=['cancel'])
 def cmd_cancel(message):
@@ -447,14 +266,32 @@ def cmd_cancel(message):
         del user_states[user_id]
     if user_id in user_logins:
         del user_logins[user_id]
-    bot.reply_to(message, "❌ Current operation cancelled!")
+    bot.reply_to(message, "❌ Operation cancelled!")
+
+@bot.message_handler(commands=['login'])
+def cmd_login(message):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, f"❌ Unauthorized! Contact {OWNER_USERNAME}")
+        return
+    
+    sessions = get_user_sessions(user_id)
+    if len(sessions) >= MAX_ACCOUNTS_PER_USER:
+        bot.reply_to(message, f"❌ You already have {MAX_ACCOUNTS_PER_USER} accounts!")
+        return
+    
+    user_states[user_id] = {"step": "username"}
+    bot.reply_to(message, "🔐 Send Instagram username (without @):\n\nType /cancel to abort.")
 
 @bot.message_handler(commands=['pair'])
 def cmd_pair(message):
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, f"❌ Unauthorized! Contact {OWNER_USERNAME}")
         return
     
-    user_id = message.from_user.id
     sessions = get_user_sessions(user_id)
     
     if not sessions:
@@ -467,23 +304,27 @@ def cmd_pair(message):
     else:
         session_list = "\n".join([f"• {name}" for name in sessions.keys()])
         user_states[user_id] = {"step": "pair", "sessions": sessions}
-        bot.reply_to(message, f"Your accounts:\n{session_list}\n\nSend nicknames to pair (e.g., acc1-acc2 or acc1,acc2):\nMax {MAX_ACCOUNTS_PER_USER} accounts")
+        bot.reply_to(message, f"Your accounts:\n{session_list}\n\nSend nicknames to pair (e.g., acc1-acc2):")
 
 @bot.message_handler(commands=['unpair'])
 def cmd_unpair(message):
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, f"❌ Unauthorized! Contact {OWNER_USERNAME}")
         return
     
-    user_id = message.from_user.id
     set_paired_accounts(user_id, [])
-    bot.reply_to(message, "✅ All accounts unpaired! Use /pair to create new army.")
+    bot.reply_to(message, "✅ All accounts unpaired!")
 
 @bot.message_handler(commands=['report'])
 def cmd_report(message):
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, f"❌ Unauthorized! Contact {OWNER_USERNAME}")
         return
     
-    user_id = message.from_user.id
     paired = get_paired_accounts(user_id)
     
     if not paired:
@@ -494,18 +335,20 @@ def cmd_report(message):
     paired_sessions = {name: sessions[name]["storage_state"] for name in paired if name in sessions}
     
     if not paired_sessions:
-        bot.reply_to(message, "❌ Paired accounts not found! Please login again.")
+        bot.reply_to(message, "❌ Paired accounts not found!")
         return
     
     user_states[user_id] = {"step": "target", "sessions": paired_sessions}
-    bot.reply_to(message, "🎯 Send Instagram profile URL or username:\n\nExample: https://www.instagram.com/username/\nor: username")
+    bot.reply_to(message, "🎯 Send Instagram profile URL or username:")
 
 @bot.message_handler(commands=['status'])
 def cmd_status(message):
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, f"❌ Unauthorized! Contact {OWNER_USERNAME}")
         return
     
-    user_id = message.from_user.id
     active = [rid for rid in active_reports if active_reports[rid] and rid.startswith(str(user_id))]
     if active:
         text = "⚔️ ACTIVE REPORTS\n\n"
@@ -517,23 +360,27 @@ def cmd_status(message):
 
 @bot.message_handler(commands=['stop'])
 def cmd_stop(message):
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, f"❌ Unauthorized! Contact {OWNER_USERNAME}")
         return
     
-    user_id = message.from_user.id
     for rid in list(active_reports.keys()):
         if rid.startswith(str(user_id)) and active_reports[rid]:
             active_reports[rid] = False
-            bot.reply_to(message, f"✅ Reporting stopped for {rid}")
+            bot.reply_to(message, f"✅ Reporting stopped!")
             return
     bot.reply_to(message, "❌ No active report found!")
 
 @bot.message_handler(commands=['logout'])
 def cmd_logout(message):
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, f"❌ Unauthorized! Contact {OWNER_USERNAME}")
         return
     
-    user_id = message.from_user.id
     sessions = get_user_sessions(user_id)
     
     if not sessions:
@@ -544,14 +391,66 @@ def cmd_logout(message):
     user_states[user_id] = {"step": "logout", "sessions": list(sessions.keys())}
     bot.reply_to(message, f"Your accounts:\n{session_list}\n\nSend nickname to remove:")
 
-# ============= CONVERSATION HANDLERS =============
-@bot.message_handler(func=lambda message: True)
-def handle_conversation(message):
-    user_id = message.from_user.id
-    
-    if user_id not in user_states:
+# ============= OWNER ONLY COMMANDS =============
+@bot.message_handler(commands=['add_admin'])
+def cmd_add_admin(message):
+    if message.from_user.id != OWNER_ID:
         return
     
+    try:
+        parts = message.text.split()
+        admin_id = int(parts[1])
+        admin_name = parts[2] if len(parts) > 2 else f"Admin_{admin_id}"
+        db = load_db()
+        if str(admin_id) not in db.get("admins", []):
+            db.setdefault("admins", []).append(str(admin_id))
+            save_db(db)
+            bot.reply_to(message, f"✅ Admin {admin_name} added!")
+        else:
+            bot.reply_to(message, "❌ Already an admin!")
+    except:
+        bot.reply_to(message, "Usage: /add_admin <user_id> <name>")
+
+@bot.message_handler(commands=['remove_admin'])
+def cmd_remove_admin(message):
+    if message.from_user.id != OWNER_ID:
+        return
+    
+    try:
+        parts = message.text.split()
+        admin_id = int(parts[1])
+        db = load_db()
+        if str(admin_id) in db.get("admins", []):
+            db["admins"].remove(str(admin_id))
+            save_db(db)
+            bot.reply_to(message, f"✅ Admin {admin_id} removed!")
+        else:
+            bot.reply_to(message, "❌ Not an admin!")
+    except:
+        bot.reply_to(message, "Usage: /remove_admin <user_id>")
+
+@bot.message_handler(commands=['adminlist'])
+def cmd_adminlist(message):
+    if message.from_user.id != OWNER_ID:
+        return
+    
+    db = load_db()
+    admins = db.get("admins", [])
+    text = "<b>👑 ADMIN LIST</b>\n\n"
+    text += f"👤 OWNER: {OWNER_USERNAME}\n"
+    text += f"🆔 ID: <code>{OWNER_ID}</code>\n\n"
+    if admins:
+        text += "<b>📋 ADMINS:</b>\n"
+        for aid in admins:
+            text += f"• <code>{aid}</code>\n"
+    else:
+        text += "No admins"
+    bot.reply_to(message, text, parse_mode='HTML')
+
+# ============= CONVERSATION HANDLER =============
+@bot.message_handler(func=lambda message: message.from_user.id in user_states)
+def handle_conversation(message):
+    user_id = message.from_user.id
     state = user_states[user_id]
     step = state.get("step")
     
@@ -566,7 +465,7 @@ def handle_conversation(message):
         password = message.text.strip()
         user_logins[user_id]["password"] = password
         user_states[user_id]["step"] = "verification"
-        bot.reply_to(message, "🔐 Login in progress...")
+        bot.reply_to(message, "🔐 Logging in...")
         
         result = instagram_login(user_logins[user_id]["username"], user_logins[user_id]["password"])
         
@@ -579,22 +478,22 @@ def handle_conversation(message):
             
         elif result["status"] == "verification_needed":
             user_states[user_id]["verification"] = True
-            bot.reply_to(message, "📱 Verification required!\n\nSend 'SMS' or 'Email' to receive code:")
+            bot.reply_to(message, "📱 Verification required!\n\nSend 'SMS' or 'Email':")
             
         else:
-            bot.reply_to(message, f"❌ Login failed: {result.get('error', 'Unknown error')}\n\nUse /login to try again.")
+            bot.reply_to(message, f"❌ Login failed!\n\nUse /login to try again.")
             del user_states[user_id]
             del user_logins[user_id]
-            
+    
     elif step == "verification" and state.get("verification"):
         method = message.text.strip().lower()
         if method in ["sms", "email"]:
             user_states[user_id]["method"] = method
             user_states[user_id]["step"] = "verification_code"
-            bot.reply_to(message, f"🔢 Send the {method.upper()} verification code:")
+            bot.reply_to(message, f"🔢 Send {method.upper()} code:")
         else:
-            bot.reply_to(message, "❌ Please send 'SMS' or 'Email'")
-            
+            bot.reply_to(message, "❌ Send 'SMS' or 'Email'")
+    
     elif step == "verification_code":
         code = message.text.strip()
         result = instagram_login(
@@ -626,11 +525,11 @@ def handle_conversation(message):
             return
         
         if len(valid) > MAX_ACCOUNTS_PER_USER:
-            bot.reply_to(message, f"❌ Max {MAX_ACCOUNTS_PER_USER} accounts allowed!")
+            bot.reply_to(message, f"❌ Max {MAX_ACCOUNTS_PER_USER} accounts!")
             return
         
         set_paired_accounts(user_id, valid)
-        bot.reply_to(message, f"✅ Paired accounts: {', '.join(valid)}\n\nUse /report to start reporting.")
+        bot.reply_to(message, f"✅ Paired: {', '.join(valid)}\n\nUse /report to start.")
         del user_states[user_id]
     
     # Logout flow
@@ -649,139 +548,12 @@ def handle_conversation(message):
                 set_paired_accounts(user_id, paired)
             bot.reply_to(message, f"✅ '{nickname}' removed!")
         else:
-            bot.reply_to(message, f"❌ Failed to remove '{nickname}'!")
+            bot.reply_to(message, f"❌ Failed to remove!")
         
         del user_states[user_id]
     
-    # Report flow
+    # Report flow - target
     elif step == "target":
         user_input = message.text.strip()
         
-        if "instagram.com/" in user_input:
-            username = extract_username_from_url(user_input)
-            if not username:
-                bot.reply_to(message, "❌ Invalid Instagram URL! Please send correct URL.")
-                return
-        else:
-            username = user_input.lower().replace("@", "")
-            if not re.match(r'^[a-zA-Z0-9_.]+$', username):
-                bot.reply_to(message, "❌ Invalid username! Please send valid Instagram username or URL.")
-                return
-        
-        user_states[user_id]["target_username"] = username
-        user_states[user_id]["step"] = "confirm"
-        
-        loading_msg = bot.reply_to(message, "📸 Fetching profile screenshot...")
-        
-        paired = get_paired_accounts(user_id)
-        sessions = get_user_sessions(user_id)
-        first_account = paired[0] if paired else None
-        
-        if first_account and first_account in sessions:
-            screenshot_path = take_profile_screenshot(sessions[first_account]["storage_state"], username)
-            
-            if screenshot_path:
-                with open(screenshot_path, 'rb') as photo:
-                    bot.send_photo(user_id, photo, caption=f"📸 Is this the correct account?\n\nUsername: @{username}\n\nReply with 'yes' to confirm or 'no' to cancel.")
-                os.remove(screenshot_path)
-            else:
-                bot.reply_to(message, f"⚠️ Could not fetch screenshot.\n\nUsername: @{username}\n\nReply with 'yes' to confirm or 'no' to cancel.")
-        else:
-            bot.reply_to(message, f"⚠️ Account: @{username}\n\nReply with 'yes' to confirm or 'no' to cancel.")
-    
-    elif step == "confirm":
-        confirmation = message.text.strip().lower()
-        
-        if confirmation == "yes":
-            user_states[user_id]["step"] = "limit"
-            bot.reply_to(message, f"📊 Enter report limit (1-{MAX_REPORT_LIMIT}):\n\nHow many reports to send?")
-        elif confirmation == "no":
-            bot.reply_to(message, "❌ Operation cancelled! Use /report to try again.")
-            del user_states[user_id]
-        else:
-            bot.reply_to(message, "❌ Please reply with 'yes' to confirm or 'no' to cancel.")
-    
-    elif step == "limit":
-        try:
-            report_limit = int(message.text.strip())
-            if 1 <= report_limit <= MAX_REPORT_LIMIT:
-                user_states[user_id]["report_limit"] = report_limit
-                user_states[user_id]["step"] = "reason"
-                
-                reasons_text = "📋 Select report reason:\n\n"
-                for key, reason in REPORT_REASONS.items():
-                    reasons_text += f"{key}. {reason['name']}\n"
-                reasons_text += f"\nSend the number (1-{len(REPORT_REASONS)}) or reason name:"
-                
-                bot.reply_to(message, reasons_text)
-            else:
-                bot.reply_to(message, f"❌ Report limit must be between 1 and {MAX_REPORT_LIMIT}!\n\nPlease enter a valid number:")
-        except ValueError:
-            bot.reply_to(message, f"❌ Please enter a valid number (1-{MAX_REPORT_LIMIT}):")
-    
-    elif step == "reason":
-        user_input = message.text.strip().lower()
-        
-        selected_reason = None
-        selected_key = None
-        for key, reason in REPORT_REASONS.items():
-            if user_input == key or user_input == reason['value'] or user_input == reason['name'].lower():
-                selected_reason = reason['value']
-                selected_key = key
-                break
-        
-        if selected_reason:
-            target_username = user_states[user_id]["target_username"]
-            report_limit = user_states[user_id]["report_limit"]
-            sessions = user_states[user_id]["sessions"]
-            
-            report_id = f"{user_id}_{int(time.time())}"
-            active_reports[report_id] = True
-            
-            thread = threading.Thread(
-                target=report_worker,
-                args=(report_id, user_id, sessions, target_username, selected_reason, report_limit),
-                daemon=True
-            )
-            thread.start()
-            
-            bot.reply_to(message, 
-                f"⚔️ REPORTING STARTED!\n\n"
-                f"🎯 Target: @{target_username}\n"
-                f"📝 Reason: {REPORT_REASONS[selected_key]['name']}\n"
-                f"🔢 Limit: {report_limit} reports\n"
-                f"👥 Accounts: {len(sessions)}\n"
-                f"🔄 Mode: Round Robin\n\n"
-                f"📨 You'll receive updates for each report!\n"
-                f"Use /stop to stop reporting.")
-            
-            del user_states[user_id]
-        else:
-            bot.reply_to(message, "❌ Invalid reason! Please select a valid option.")
-
-# ============= MAIN =============
-if __name__ == "__main__":
-    print("="*60)
-    print("🔥 INSTAGRAM REPORT BOT 🔥")
-    print(f"👑 Owner: {OWNER_USERNAME} (ID: {OWNER_ID})")
-    print(f"📁 Database: {DB_FILE}")
-    print(f"📊 Max Report Limit: {MAX_REPORT_LIMIT}")
-    print("="*60)
-    print("✅ Bot running...")
-    
-    os.makedirs("screenshots", exist_ok=True)
-    
-    # Start web server for keep-alive
-    def run_web():
-        app.run(host='0.0.0.0', port=8080)
-    
-    web_thread = threading.Thread(target=run_web, daemon=True)
-    web_thread.start()
-    
-    try:
-        bot.remove_webhook()
-        print("✅ Webhook removed")
-    except:
-        pass
-    
-    bot.infinity_polling()
+        if "instagram.com/" i
