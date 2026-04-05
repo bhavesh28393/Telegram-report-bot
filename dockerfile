@@ -40,9 +40,13 @@ RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
 # Copy requirements
 COPY requirements.txt .
 
-# Install all Python packages
+# Install ALL Python packages directly (no skipping)
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir flask==2.3.0
+RUN pip install --no-cache-dir playwright==1.40.0
+RUN pip install --no-cache-dir playwright-stealth==1.0.6
+RUN pip install --no-cache-dir pyTelegramBotAPI==4.14.0
+RUN pip install --no-cache-dir greenlet==2.0.2
 
 # Install Playwright browsers
 RUN playwright install chromium
