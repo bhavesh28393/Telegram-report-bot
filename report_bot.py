@@ -25,7 +25,7 @@ def run_web():
     app.run(host='0.0.0.0', port=8080)
 
 # ============= CONFIG =============
-API_TOKEN = "8623039191:AAErxthmUyJAZV-xsEP2I_OY5rW_IUc6_8Q"
+API_TOKEN = "8623039191:AAGvUc3OUALN4fmEeaecruR9rjMurLMqfYk"
 OWNER_ID = 8336576838
 OWNER_USERNAME = "@pruvn"
 DB_FILE = "sessions.json"
